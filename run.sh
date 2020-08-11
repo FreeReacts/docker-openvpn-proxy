@@ -3,7 +3,17 @@
 # Global vars
 PROG_NAME='DockerTinyproxy'
 PROXY_CONF='/etc/tinyproxy/tinyproxy.conf'
-TAIL_LOG='/var/log/tinyproxy/tinyproxy.log'
+TINYPROXY_TAIL_LOG='/var/log/tinyproxy/tinyproxy.log'
+OPENVPN_TAIL_LOG="/var/log/openvpn/openvpn.log"
+GATEWAY=$(ip route | grep default | cut -f 3 -d' ')
+VPN_CONFIG_DIR="/openvpn"
+ARGS="$@"
+VPN_PID=0
+
+# Accessing a named argument
+namedArg() {
+	echo "$ARGS" | awk -F "$1" '{print $2}' | cut -d' ' -f2
+}
 
 # Usage: screenOut STATUS message
 screenOut() {
@@ -39,16 +49,11 @@ checkStatus() {
 displayUsage() {
     echo
     echo '  Usage:'
-    echo "      docker run -d --name='tinyproxy' -p <Host_Port>:8888 dannydirect/tinyproxy:latest <ACL>"
-    echo
-    echo "      - Set <Host_Port> to the port you wish the proxy to be accessible from."
-    echo "      - Set <ACL> to 'ANY' to allow unrestricted proxy access, or one or more spece seperated IP/CIDR addresses for tighter security."
-    echo
-    echo "      Examples:"
-    echo "          docker run -d --name='tinyproxy' -p 6666:8888 dannydirect/tinyproxy:latest ANY"
-    echo "          docker run -d --name='tinyproxy' -p 7777:8888 dannydirect/tinyproxy:latest 87.115.60.124"
-    echo "          docker run -d --name='tinyproxy' -p 8888:8888 dannydirect/tinyproxy:latest 10.103.0.100/24 192.168.1.22/16"
-    echo
+    echo "      docker run -d -ti --cap-add=NET_ADMIN --device=/dev/net/tun --name='usavpn' -v "/path/to/vpn.ovpn:/openvpn/config.ovpn" freereacts/openvpnproxy:latest -u username -p mysecurepassword -i 10.1.0.0/24"
+    echo 
+    echo "      [-u username] Username for the VPN connection."
+    echo "      [-p password] Password for the VPN connection."
+    echo "      -i ip_range IP Address range of your host network."
 }
 
 stopService() {
@@ -61,29 +66,17 @@ stopService() {
     else
         screenOut "Tinyproxy service not running."
     fi
-}
 
-parseAccessRules() {
-    list=''
-    for ARG in $@; do
-        line="Allow\t$ARG\n"
-        list+=$line
-    done
-    echo "$list" | sed 's/.\{2\}$//'
-}
+    screenOut "Checking for running openvpn service..."
+    if [ "$(pidof openvpn)" ]; then
+        screenOut "Found. Stopping openvpn service for pre-configuration..."
+        killall openvpn
+        checkStatus $? "Could not stop openvpn service." \
+                       "openvpn service stopped successfully."
+    else
+        screenOut "openvpn service not running."
+    fi
 
-setMiscConfig() {
-    sed -i -e"s,^MinSpareServers ,MinSpareServers\t1 ," $PROXY_CONF
-    checkStatus $? "Set MinSpareServers - Could not edit $PROXY_CONF" \
-                   "Set MinSpareServers - Edited $PROXY_CONF successfully."
-
-    sed -i -e"s,^MaxSpareServers ,MaxSpareServers\t1 ," $PROXY_CONF
-    checkStatus $? "Set MinSpareServers - Could not edit $PROXY_CONF" \
-                   "Set MinSpareServers - Edited $PROXY_CONF successfully."
-    
-    sed -i -e"s,^StartServers ,StartServers\t1 ," $PROXY_CONF
-    checkStatus $? "Set MinSpareServers - Could not edit $PROXY_CONF" \
-                   "Set MinSpareServers - Edited $PROXY_CONF successfully."
 }
 
 enableLogFile() {
@@ -91,15 +84,8 @@ enableLogFile() {
 }
 
 setAccess() {
-    if [[ "$1" == *ANY* ]]; then
-        sed -i -e"s/^Allow /#Allow /" $PROXY_CONF
-        checkStatus $? "Allowing ANY - Could not edit $PROXY_CONF" \
-                       "Allowed ANY - Edited $PROXY_CONF successfully."
-    else
-        sed -i "s,^Allow 127.0.0.1,$1," $PROXY_CONF
-        checkStatus $? "Allowing IPs - Could not edit $PROXY_CONF" \
-                       "Allowed IPs - Edited $PROXY_CONF successfully."
-    fi
+	namedArg "-u"
+	sed -i "s/^Allow 127.0.0.1/Allow $GATEWAY/g" $PROXY_CONF
 }
 
 setAuth() {
@@ -109,35 +95,6 @@ setAuth() {
     fi
 }
 
-setFilter(){
-    if [ -n "$FilterDefaultDeny" ] ; then
-        screenOut "Setting up FilterDefaultDeny."
-        sed -i -e"s/#FilterDefaultDeny Yes/FilterDefaultDeny $FilterDefaultDeny/" $PROXY_CONF
-    fi
-
-    if [ -n "$FilterURLs" ] ; then
-        screenOut "Setting up FilterURLs."
-        sed -i -e"s/#FilterURLs Yes/FilterURLs $FilterURLs/" $PROXY_CONF
-    fi
-    
-    if [ -n "$FilterExtended" ] ; then
-            screenOut "Setting up FilterExtended."
-            sed -i -e"s/#FilterExtended Yes/FilterExtended $FilterExtended/" $PROXY_CONF
-    fi
-    
-    if [ -n "$FilterCaseSensitive" ] ; then
-            screenOut "Setting up FilterCaseSensitive."
-            sed -i -e"s/#FilterCaseSensitive Yes/FilterCaseSensitive $FilterCaseSensitive/" $PROXY_CONF
-    fi
-    
-    
-    if [ -n "$Filter" ] ; then
-            screenOut "Setting up Filter."
-            sed -i -e"s+#Filter \"/etc/tinyproxy/filter\"+Filter \"$Filter\"+" $PROXY_CONF
-    fi
-
-}
-
 setTimeout() {
     if [ -n "${TIMEOUT}"  ]; then
         screenOut "Setting up Timeout."
@@ -145,7 +102,20 @@ setTimeout() {
     fi
 }
 
-startService() {
+setCredentials() {
+    USERNAME=$(namedArg "-u")
+    PASSWORD=$(namedArg "-p")
+
+    if [ -n "$USERNAME" ]; then
+        echo "$USERNAME" >> "$VPN_CONFIG_DIR/auth.txt"
+    fi
+
+    if [ -n "$PASSWORD" ]; then
+	echo "$PASSWORD" >> "$VPN_CONFIG_DIR/auth.txt"
+    fi
+}
+
+startProxy() {
     screenOut "Starting Tinyproxy service..."
     /usr/bin/tinyproxy
     checkStatus $? "Could not start Tinyproxy service." \
@@ -154,35 +124,62 @@ startService() {
 
 tailLog() {
     touch /var/log/tinyproxy/tinyproxy.log
-    screenOut "Tailing Tinyproxy log..."
-    tail -f $TAIL_LOG
-    checkStatus $? "Could not tail $TAIL_LOG" \
+
+    screenOut "Tailing tinyproxy and openvpn log..."
+    tail -f $TINYPROXY_TAIL_LOG &
+    TP_TAIL_PID=$!
+    TP_TAIL_STATUS=$?
+
+    wait $VPN_PID
+
+    checkStatus $? "Could not connect to the VPN connection" \
+	           "VPN connection stopped"
+
+    checkStatus $TP_TAIL_STATUS "Could not tail $TAIL_LOG" \
                    "Stopped tailing $TAIL_LOG"
+
+    kill $TP_TAIL_PID
 }
 
-# Check args
-if [ "$#" -lt 1 ]; then
-    displayUsage
-    exit 1
+startVPN(){
+    /usr/sbin/openvpn --config "$VPN_CONFIG_DIR/config.ovpn" --auth-user-pass "$VPN_CONFIG_DIR/auth.txt" &
+    VPN_PID=$!    
+    ip route add $IP_ADDRESS via $(ip r | grep "default" | awk -F'[ ]+' '{{print $3}}') dev eth0
+}
+
+IP_ADDRESS=$(namedArg "-i")
+# Display Usage
+if  [ -n "$IP_ADDRESS"]; then
+	screenOut "Please provide a ip address."
+	displayUsage
+	exit 1
 fi
+
+# Display Usage
+if [ ! -f "$VPN_CONFIG_DIR/config.ovpn" ]; then
+	screenOut "Please provide an openvpn config file."
+	displayUsage
+	exit 1
+fi
+
 # Start script
 echo && screenOut "$PROG_NAME script started..."
-# Stop Tinyproxy if running
+# Stop Tinyproxy and openvpn if running
 stopService
-# Parse ACL from args
-export rawRules="$@" && parsedRules=$(parseAccessRules $rawRules) && unset rawRules
-# Set ACL in Tinyproxy config
-setAccess $parsedRules
+# Allowing host PC to access
+setAccess
+# Set openvpn credentials
+setCredentials
 # Enable basic auth (if any)
 setAuth
-# Enable Filtering (if any)
-setFilter
 # Set Timeout (if any)
 setTimeout
 # Enable log to file
 enableLogFile
 # Start Tinyproxy
-startService
+startProxy
+# Start OpenVPN
+startVPN
 # Tail Tinyproxy log
 tailLog
 # End

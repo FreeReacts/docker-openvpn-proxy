@@ -1,9 +1,10 @@
-FROM alpine:3.10
+FROM alpine:latest
 
 RUN apk add --no-cache \
 	bash \
-	tinyproxy
+	tinyproxy \
+	openvpn
 
-COPY run.sh /opt/docker-tinyproxy/run.sh
+COPY run.sh /opt/docker-openvpn-proxy/run.sh
 
-ENTRYPOINT ["/opt/docker-tinyproxy/run.sh"]
+ENTRYPOINT ["/opt/docker-openvpn-proxy/run.sh"]
