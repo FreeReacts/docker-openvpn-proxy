@@ -2,7 +2,7 @@
 
 Use unlimited multiple openvpn connections simultaneously.
 
-Find it on [GitHub](https://github.com/whizsid/docker-openvpn-proxy).
+Find it on [GitHub](https://github.com/FreeReacts/docker-openvpn-proxy).
 
 Find it on [DockerHub](https://hub.docker.com/repository/docker/freereacts/openvpnproxy).
 
