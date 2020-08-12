@@ -1,1 +1,0 @@
-docker stop tinyproxy && docker rm tinyproxy && docker build -t dannydirect/tinyproxy:latest . && docker run -d --name='tinyproxy' -p 7777:8888 dannydirect/tinyproxy:latest && docker logs -f tinyproxy
