@@ -1,44 +1,37 @@
-# Docker Tinyproxy ![alt text](https://raw.githubusercontent.com/daniel-middleton/docker-tinyproxy/master/other/banu_logo.png "Banu!")
-A quick and easy Dockerised Tinyproxy with configurable ACL.
+# Docker OpenVPN proxy
 
-Find it on [GitHub](https://github.com/monokal/docker-tinyproxy).
+Use unlimited multiple openvpn connections simultaneously.
+
+Find it on [GitHub](https://github.com/whizsid/docker-openvpn-proxy).
 
 Find it on [DockerHub](https://hub.docker.com/repository/docker/monokal/tinyproxy).
 
-### Usage
+## Usage
 ---
-##### Running a new Tinyproxy container
+### 1. Running a new VPN proxy container
 
 ```
 Usage:
-    docker run -d --name='tinyproxy' -p <Host_Port>:8888 --env BASIC_AUTH_USER=<username> --env BASIC_AUTH_PASSWORD=<password> --env TIMEOUT=<timeout> monokal/tinyproxy:latest <ACL>
+docker run -d -ti --cap-add=NET_ADMIN --device=/dev/net/tun --name='usavpn' -v "/path/to/vpn.ovpn:/openvpn/config.ovpn" freereacts/openvpnproxy:latest -u username -p mysecurepassword -i 10.1.0.0/24"
 
-        - Set <Host_Port> to the port you wish the proxy to be accessible from.
-        - Set <ACL> to 'ANY' to allow unrestricted proxy access, or one or more space seperated IP/CIDR addresses for tighter security.
-        - Basic auth is optional.
-        - Timeout is optional.
-
-    Examples:
-        docker run -d --name='tinyproxy' -p 6666:8888 monokal/tinyproxy:latest ANY
-        docker run -d --name='tinyproxy' -p 7777:8888 monokal/tinyproxy:latest 87.115.60.124
-        docker run -d --name='tinyproxy' -p 8888:8888 monokal/tinyproxy:latest 10.103.0.100/24 192.168.1.22/16
+[-u username] Username for the VPN connection.
+[-p password] Password for the VPN connection.
+-i ip_range IP Address/ IP Range of your host network to allow requests.
 ```
 
-### Monitoring
----
-##### Logs
-`docker logs -f tinyproxy` will display a following tail of `/var/log/tinyproxy/tinyproxy.log`
+### 2. Get the ip of container
 
-##### Stats
-Navigating to `http://tinyproxy.stats/` while connected to the proxy will display the Tinyproxy Stats page.
-
-##### Filtering
-Any Tinyproxy filter setting such as FilterDefaultDeny can be set as an environment variable.  You can map a filter file on the parent file system into the container for the proxy instance to use.
-
+Run `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' container_name_or_id` on your host PC.
 ```
-        docker run -d --name='tinyproxy' -p 6666:8888 -v ~/filter-on-parent.conf:/etc/tinyproxy/filter.conf  --env Filter="/etc/tinyproxy/filter.conf" --env FilterDefaultDeny=Yes  monokal/tinyproxy:latest ANY
+$ docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' container_name_or_id
+172.16.0.2
 ```
+
+### 3. Adding the proxy to your browser
+
+Add the result ip address as the proxy ip address and 8888 as the proxy port to your browser.
 
 ### Contribute
 ---
 As always, contributions are appriciated. Simply open a Pull request.
+
